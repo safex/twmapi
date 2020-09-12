@@ -8,7 +8,7 @@
   },
   "author": {
     "name": "Daniel Dabek",
-    "url": "https://safex.io",
+    "url": "https://safex.org",
     "email": "daniel@safex.io"
   },
   "maintainers": [
@@ -37,8 +37,7 @@
   ],
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "listen": "babel-node src/api/main.js"
+    "process_blocks": "babel-node src/bin/process_blocks.js"
   },
   "dependencies": {
     "axios": "^0.19.2",
