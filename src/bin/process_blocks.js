@@ -167,6 +167,7 @@ async function main() {
                                             let biography = '';
                                             let website = '';
                                             let location = '';
+                                            let category = '';
                                             let twm_version = 0;
                                             console.log(String.fromCharCode.apply(null,
                                                 vout.target.script.data.slice(username_position + 34, vout.target.script.data.length + 1)));
@@ -202,6 +203,9 @@ async function main() {
                                                 if (twm_description.location) {
                                                     location = twm_description.location;
                                                 }
+                                                if (twm_description.category) {
+                                                    category = twm_description.category;
+                                                }
                                             } catch(err) {
                                                 console.error(err);
                                                 console.error(`description is not parsable`);
@@ -226,6 +230,7 @@ async function main() {
                                                 save_obj.location = location;
                                                 save_obj.safex_public_key = pub_keys;
                                                 save_obj.twm_version = twm_version;
+                                                save_obj.category = category;
 
                                                 let the_save = await save_user(save_obj);
                                                 console.log(the_save);
