@@ -29,7 +29,7 @@ exports.up = (knex) => {
             table.string('offer_id');
             table.string('username');
             table.string('title');
-            table.string('description');
+            table.string('description', '2000');
             table.string('raw_description', '8000');
             table.string('main_image', '500');
             table.string('sku');
