@@ -72,8 +72,29 @@ async function save_offer(offer) {
         }
     });
 }
+
+
+async function daemon_parse_transaction(data) {
+    let d_obj = {};
+    d_obj.jsonrpc = "2.0";
+    d_obj.id = 0;
+    d_obj.method = "decode_safex_output";
+    let h_obj = {};
+    h_obj.output_type = 20;
+    h_obj.data = data;
+    d_obj.params = h_obj;
+    return axios({
+        method: 'post',
+        url: 'http://127.0.0.1:30393/json_rpc',
+        data: d_obj
+    }).then((resp) => {
+        return resp.data.result;
+    })
+}
+
+
 const snooze = ms => new Promise(resolve => setTimeout(resolve, ms));
-var last_block_scanned = 20000;
+var last_block_scanned = 85000;
 var users_arr = [];
 
 async function main() {
@@ -100,33 +121,33 @@ async function main() {
                                 if (vout.target.script) {
                                     console.log(`ding ding ding`);
 
-                                    switch(parseInt(vout.target.script.output_type)) {
+                                    switch (parseInt(vout.target.script.output_type)) {
                                         case 0: {
                                             console.log(`cash txn`);
                                             break;
-                                        };
+                                        }
                                         case 1: {
                                             console.log(`token txn`);
                                             break;
-                                        };
+                                        }
                                         case 2: {
                                             console.log(`migration txn`);
                                             break;
-                                        };
+                                        }
                                         case 10: {
                                             console.log(`generic advanced txn`);
                                             break;
-                                        };
+                                        }
                                         case 11: {
                                             console.log(`stake token txn`);
                                             break;
-                                        };
+                                        }
                                         case 12: {
                                             console.log(`sfx payment to pool as part of purchase`);
                                             console.log(got_block.block_header);
 
                                             break;
-                                        };
+                                        }
                                         case 15: {
                                             console.log(`account creation`);
                                             console.log(`create account transaction`);
@@ -167,7 +188,6 @@ async function main() {
                                             let biography = '';
                                             let website = '';
                                             let location = '';
-                                            let category = '';
                                             let twm_version = 0;
                                             console.log(String.fromCharCode.apply(null,
                                                 vout.target.script.data.slice(username_position + 34, vout.target.script.data.length + 1)));
@@ -203,10 +223,7 @@ async function main() {
                                                 if (twm_description.location) {
                                                     location = twm_description.location;
                                                 }
-                                                if (twm_description.category) {
-                                                    category = twm_description.category;
-                                                }
-                                            } catch(err) {
+                                            } catch (err) {
                                                 console.error(err);
                                                 console.error(`description is not parsable`);
                                             }
@@ -230,13 +247,12 @@ async function main() {
                                                 save_obj.location = location;
                                                 save_obj.safex_public_key = pub_keys;
                                                 save_obj.twm_version = twm_version;
-                                                save_obj.category = category;
 
                                                 let the_save = await save_user(save_obj);
                                                 console.log(the_save);
 
                                                 break;
-                                            } catch(err) {
+                                            } catch (err) {
                                                 console.error(err);
                                                 console.error(`error at saving the user object at account creation output`);
                                                 process.exit();
@@ -244,15 +260,20 @@ async function main() {
                                             }
                                             break;
 
-                                        };
+                                        }
                                         case 16: {
                                             console.log(`account update txn`);
                                             break;
-                                        };
+                                        }
                                         case 20: {
                                             console.log(`safex offer txn`);
                                             console.log(vout.target.script);
                                             console.log(last_block_scanned);
+
+                                            let offer_detailed_data = await daemon_parse_transaction(vout.target.script.data);
+                                            console.log(offer_detailed_data);
+                                            let offer_detailed_fields = offer_detailed_data.parsed_fields;
+
                                             let offer_id = '';
                                             for (const dec of vout.target.script.data.slice(0, 32)) {
                                                 offer_id += dec.toString(16);
@@ -264,16 +285,16 @@ async function main() {
                                             let offer_title = vout.target.script.data.slice(offer_title_start, offer_title_start + offer_title_length + 1);
                                             let price = vout.target.script.data.slice(offer_title_start + offer_title_length + 1, offer_title_start + offer_title_length + 9);
                                             price.reverse();
-                                            var price_to_number = price.reduce((a,c,i)=> a+c*2**(56-i*8),0) / 10000000000;
+                                            var price_to_number = price.reduce((a, c, i) => a + c * 2 ** (56 - i * 8), 0) / 10000000000;
                                             console.log(price_to_number);
 
                                             let min_price = vout.target.script.data.slice(offer_title_start + offer_title_length + 9, offer_title_start + offer_title_length + 17);
                                             min_price.reverse();
-                                            var min_price_to_number = min_price.reduce((a,c,i)=> a+c*2**(56-i*8),0) / 10000000000;
+                                            var min_price_to_number = min_price.reduce((a, c, i) => a + c * 2 ** (56 - i * 8), 0) / 10000000000;
                                             console.log(`min sfx price ${min_price_to_number}`);
                                             let quantity = vout.target.script.data.slice(offer_title_start + offer_title_length + 17, offer_title_start + offer_title_length + 25);
                                             quantity.reverse();
-                                            var quantity_to_number = quantity.reduce((a,c,i)=> a+c*2**(56-i*8),0);
+                                            var quantity_to_number = quantity.reduce((a, c, i) => a + c * 2 ** (56 - i * 8), 0);
                                             console.log(`quantity_to_number  ${quantity_to_number}`);
                                             let active_bool = vout.target.script.data[offer_title_start + offer_title_length + 25];
                                             console.log(`active bool ${active_bool}`);
@@ -285,10 +306,12 @@ async function main() {
                                             console.log(String.fromCharCode.apply(null, description_raw));
                                             //process.exit();
 
+
+
                                             let username_slice = vout.target.script.data.slice(65, 65 + vout.target.script.data[64]);
                                             console.log(`username length ${vout.target.script.data[64]}`);
                                             console.log(`username ${String.fromCharCode.apply(null, username_slice)}`);
-                                            console.log(`offer title ${String.fromCharCode.apply(null,offer_title)}`);
+                                            console.log(`offer title ${String.fromCharCode.apply(null, offer_title)}`);
                                             console.log(`\n`);
                                             console.log(parseInt(232).toString(16));
                                             console.log(String.fromCharCode.apply(null, vout.target.script.data));
@@ -302,9 +325,10 @@ async function main() {
                                             let message_type = '';
                                             let physical = true;
                                             let twm_version = 0;
+                                            let category = '';
                                             try {
 
-                                                let twm_description = JSON.parse(String.fromCharCode.apply(null, description_raw));
+                                                let twm_description = JSON.parse(offer_detailed_fields[2].value);
 
                                                 if (twm_description.twm_version === 1) {
                                                     twm_formatted = true;
@@ -332,16 +356,20 @@ async function main() {
                                                     message_type = twm_description.message_type;
                                                 }
                                                 if (twm_description.physical) {
-                                                    physical = twm_description.physical;
+                                                    //physical = twm_description.physical;
+                                                    //assume all items are physical for now.
                                                 }
-                                            } catch(err) {
+                                                if (twm_description.category) {
+                                                    category = twm_description.category;
+                                                }
+                                            } catch (err) {
                                                 console.error(err);
                                                 console.error(`offer description is not parsable`);
                                             }
                                             try {
                                                 let save_obj = {};
-                                                save_obj.offer_id = offer_id;
-                                                save_obj.username = String.fromCharCode.apply(null, username_slice);
+                                                save_obj.offer_id = offer_detailed_fields[3].value;
+                                                save_obj.username = offer_detailed_fields[0].value;
                                                 save_obj.main_image = main_image;
                                                 save_obj.admin_approved = false;
                                                 save_obj.sku = sku;
@@ -350,55 +378,55 @@ async function main() {
                                                 save_obj.country = country;
                                                 save_obj.message_type = message_type;
                                                 save_obj.twm_formatted = twm_formatted;
-                                                save_obj.raw_description = description_raw;
+                                                save_obj.raw_description = offer_detailed_fields[2].value;
                                                 save_obj.block_height = got_block.block_header.height;
                                                 save_obj.physical = physical;
                                                 save_obj.twm_version = twm_version;
                                                 save_obj.min_price = min_price_to_number;
-                                                save_obj.price = price_to_number;
-                                                save_obj.oracle = oracle_bool ? true : false;
-                                                save_obj.oracle_id = oracle_bool ? '' : '';
-                                                save_obj.quantity = quantity_to_number;
+                                                save_obj.price = offer_detailed_fields[5].value / 10000000000;
+                                                save_obj.oracle = offer_detailed_fields[8].value ? true : false;
+                                                save_obj.oracle_id = offer_detailed_fields[4].value;
+                                                save_obj.quantity = offer_detailed_fields[7].value;
                                                 save_obj.description = description;
+                                                save_obj.category = category;
 
                                                 let the_save = await save_offer(save_obj);
                                                 console.log(the_save);
 
                                                 break;
-                                            } catch(err) {
+                                            } catch (err) {
                                                 console.error(err);
                                                 console.error(`error at saving the offer object at offer creation output`);
                                                 process.exit();
                                                 break;
                                             }
-                                        };
+                                        }
                                         case 21: {
                                             console.log(`edit offer txn`);
                                             break;
-                                        };
+                                        }
                                         case 30: {
                                             console.log(`purchase offer txn`);
                                             console.log(vout.target.script);
                                             console.log(last_block_scanned);
-                                            process.exit();
                                             break;
-                                        };
+                                        }
                                         case 40: {
                                             console.log(`feedback token`);
                                             break;
-                                        };
+                                        }
                                         case 41: {
                                             console.log(`feedback txn`);
                                             break;
-                                        };
+                                        }
                                         case 50: {
                                             console.log(`new price oracle txn`);
                                             break;
-                                        };
+                                        }
                                         case 51: {
                                             console.log(`price oracle update txn`);
                                             break;
-                                        };
+                                        }
                                     }
 
                                 } else {
@@ -415,13 +443,8 @@ async function main() {
             } catch (err) {
                 console.error(err);
                 console.error(`error at getting block ${last_block_scanned}`)
-
             }
         }
-
-        //end of the scan loop here
-
-
     } catch (err) {
         console.error(err);
         console.error(`error at getting the block height`);
