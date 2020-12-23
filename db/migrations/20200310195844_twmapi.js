@@ -4,7 +4,7 @@ exports.up = (knex) => {
             table.increments('id').unsigned().primary();
             table.string('username', '64').unique();
             table.boolean('approved_flag').defaultTo(false);
-            table.string('avatar_image', '500');
+            table.string('avatar_image', '2000');
             table.string('twitter_url');
             table.string('facebook_url');
             table.string('linkedin_url');
@@ -22,7 +22,7 @@ exports.up = (knex) => {
             table.string('location');
             table.integer('block_height');
             table.string('pgp_fingerprint');
-            table.string('registration_message', '2000');
+            table.string('registration_message', '8000');
         })
         .createTable('offers', (table) => {
             table.increments('id').primary();
@@ -31,21 +31,28 @@ exports.up = (knex) => {
             table.string('title');
             table.string('description', '2000');
             table.string('raw_description', '8000');
-            table.string('main_image', '500');
+            table.string('main_image', '2000');
             table.string('sku');
             table.string('barcode');
             table.string('weight');
             table.string('country');
             table.string('category');
+            table.string('type');
             table.string('message_type');
             table.integer('block_height');
+            table.boolean('open_message');
+            table.boolean('shipping');
+            table.boolean('nft');
             table.boolean('physical').defaultTo(true);
             table.float('price', 10,20);
             table.float('min_price', 10, 20);
             table.boolean('oracle');
             table.string('oracle_id');
+            table.boolean('active');
+            table.boolean('edit_admin_reapprove').defaultTo(false);
             table.float('quantity', 20, 0);
             table.integer('twm_version');
+            table.integer('edit_version').defaultTo(0);
             table.boolean('admin_approved').defaultTo(false);
             table.boolean('twm_formatted').defaultTo(false);
             table.timestamp('admin_rejected').defaultTo(null);
@@ -60,25 +67,25 @@ exports.up = (knex) => {
             table.timestamp('admin_rejected').defaultTo(null);
             table.string('admin_rejected_reason');
         })
-        .createTable('conversations', (table) => {
+        .createTable('offer_edits', (table) => {
             table.bigIncrements('id').primary();
-            table.string('convo_id').unique();
-            table.string('subject');
             table.string('offer_id');
-            table.string('originator_pgp_key');
-            table.string('receiver_pgp_key');
-            table.string('status');
-            table.timestamp('time_initiated').defaultTo(null);
-            table.timestamp('time_last_message').defaultTo(null);
+            table.string('edit_txid').unique();
+            table.timestamp('timestamp').defaultTo(null);
         })
         .createTable('messages', (table) => {
             table.bigIncrements('id').primary();
-            table.string('subject');
-            table.string('offer_id');
-            table.string('convo_id').references('conversations.convo_id');
-            table.string('encrypted_message');
+            table.string('order_id');
+            table.string('msg_id');
+            table.string('from');
+            table.string('to');
+            table.string('message');
+            table.string('type');
+            table.string('purchase_proof');
+            table.string('message_hash');
             table.string('message_signature');
-            table.string('convo_message_index');
+            table.string('sender_pgp_pub_key');
+            table.timestamp('timestamp').defaultTo(null);
         });
 };
 
@@ -87,6 +94,6 @@ exports.down = (knex) => {
         .dropTable('users')
         .dropTable('offers')
         .dropTable('messages')
-        .dropTable('conversations')
-        .dropTable('offer_images');
+        .dropTable('offer_images')
+        .dropTable('offer_edits');
 };

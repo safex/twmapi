@@ -2,6 +2,7 @@ import axios from 'axios';
 
 import users from '../../db/models/users';
 import offers from '../../db/models/offers';
+import offer_edits from '../../db/models/offer_edits';
 
 import knex from 'knex';
 
@@ -54,7 +55,7 @@ async function get_user(obj) {
 async function save_user(user) {
     return users.where({username: user.username}).count().then((count) => {
         if (count > 0) {
-            console.log("we got more here");
+            console.log("we got more users here, duplicate");
         } else {
             console.log("time to save it");
             return users.forge(user).save(null, {method: 'insert'});
@@ -65,7 +66,7 @@ async function save_user(user) {
 async function save_offer(offer) {
     return offers.where({offer_id: offer.offer_id}).count().then((count) => {
         if (count > 0) {
-            console.log("we got more here");
+            console.log("we got more offers here, duplicate");
         } else {
             console.log("time to save it");
             return offers.forge(offer).save(null, {method: 'insert'});
@@ -73,14 +74,47 @@ async function save_offer(offer) {
     });
 }
 
+async function save_offer_edit_txn(edit) {
+    return offer_edits.where({edit_txid: edit.edit_txid}).count().then((count) => {
+        if (count > 0) {
+            console.log("we got more edit offers of the same kind here, duplicate");
+        } else {
+            console.log("time to save it an edit offer");
+            return offer_edits.forge(edit).save(null, {method: 'insert'});
+        }
+    });
+}
 
-async function daemon_parse_transaction(data) {
+async function get_offer_by_offer_id(offer_id) {
+    return offers.where({offer_id: offer_id}).fetchAll().then((offer) => {
+        if (offer.length === 1) {
+            return offer;
+        } else {
+            return 0;
+        }
+    });
+}
+
+async function save_edit_offer(offer_id, edit_obj) {
+    return offers.where({offer_id: offer_id}).save(edit_obj, { patch: true }).then((offer) => {
+        return offer;
+    })
+}
+
+async function get_offer_version_counts(offer_id) {
+    return offer_edits.where({offer_id: offer_id}).count().then((offer_count) => {
+        return offer_count;
+    })
+}
+
+
+async function daemon_parse_transaction(data, output_type) {
     let d_obj = {};
     d_obj.jsonrpc = "2.0";
     d_obj.id = 0;
     d_obj.method = "decode_safex_output";
     let h_obj = {};
-    h_obj.output_type = 20;
+    h_obj.output_type = output_type;
     h_obj.data = data;
     d_obj.params = h_obj;
     return axios({
@@ -94,7 +128,7 @@ async function daemon_parse_transaction(data) {
 
 
 const snooze = ms => new Promise(resolve => setTimeout(resolve, ms));
-var last_block_scanned = 85000;
+var last_block_scanned = 50000;
 var users_arr = [];
 
 async function main() {
@@ -144,40 +178,12 @@ async function main() {
                                         }
                                         case 12: {
                                             console.log(`sfx payment to pool as part of purchase`);
-                                            console.log(got_block.block_header);
 
                                             break;
                                         }
                                         case 15: {
                                             console.log(`account creation`);
                                             console.log(`create account transaction`);
-
-
-                                            let user_indexes = [];
-                                            let username_position = vout.target.script.data[0] + 1;
-                                            for (var i = 1; i < username_position; i++) {
-                                                if (vout.target.script.data[i] > 47 && vout.target.script.data[i] < 127) {
-                                                    user_indexes.push(vout.target.script.data[i]);
-                                                } else {
-                                                    i = vout.target.script.data.length;
-                                                }
-                                            }
-
-
-                                            console.log(user_indexes);
-                                            let user_id = String.fromCharCode.apply(null, user_indexes);
-                                            console.log(user_id);
-
-                                            let u_obj = {};
-                                            u_obj.username = user_id;
-
-                                            console.log(u_obj);
-                                            let userss = await get_user(u_obj);
-
-                                            let pub_keys = '';
-                                            for (const dec of vout.target.script.data.slice(username_position, username_position + 32)) {
-                                                pub_keys += dec.toString(16);
-                                            }
 
                                             let twm_formatted = false;
                                             let twitter_url = '';
@@ -189,75 +195,87 @@ async function main() {
                                             let website = '';
                                             let location = '';
                                             let twm_version = 0;
-                                            console.log(String.fromCharCode.apply(null,
-                                                vout.target.script.data.slice(username_position + 34, vout.target.script.data.length + 1)));
                                             try {
-                                                let twm_description = JSON.parse(String.fromCharCode.apply(null,
-                                                    vout.target.script.data.slice(username_position + 34, vout.target.script.data.length + 1)));
 
-                                                if (twm_description.twm_version === 1) {
-                                                    twm_formatted = true;
-                                                    twm_version = 1;
+                                                let user_detailed_data_raw = await daemon_parse_transaction(vout.target.script.data, 15);
+                                                let user_detailed_data = user_detailed_data_raw.parsed_fields;
+                                                console.log(user_detailed_data);
+                                                let twm_description;
+                                                try {
+                                                    twm_description = JSON.parse(user_detailed_data[1].value);
+
+                                                    if (twm_description.twm_version === 1) {
+                                                        twm_formatted = true;
+                                                        twm_version = 1;
+                                                    }
+                                                    if (twm_description.avatar) {
+                                                        avatar_image = twm_description.avatar;
+                                                    }
+                                                    if (twm_description.twitter) {
+                                                        twitter_url = twm_description.twitter;
+                                                    }
+                                                    if (twm_description.facebook) {
+                                                        facebook_url = twm_description.facebook;
+                                                    }
+                                                    if (twm_description.linkedin) {
+                                                        linkedin_url = twm_description.linkedin;
+                                                    }
+                                                    if (twm_description.email_address) {
+                                                        email_address = twm_description.email_address;
+                                                    }
+                                                    if (twm_description.biography) {
+                                                        biography = twm_description.biography;
+                                                    }
+                                                    if (twm_description.website) {
+                                                        website = twm_description.website;
+                                                    }
+                                                    if (twm_description.location) {
+                                                        location = twm_description.location;
+                                                    }
+                                                } catch (err) {
+                                                    console.error(err);
+                                                    console.error(`description is not parsable`);
                                                 }
-                                                if (twm_description.avatar) {
-                                                    avatar_image = twm_description.avatar;
+                                                try {
+                                                    let save_obj = {};
+
+                                                    save_obj.username = user_detailed_data[0].value;
+                                                    save_obj.avatar_image = avatar_image;
+                                                    save_obj.admin_approved = false;
+                                                    save_obj.twitter_url = twitter_url;
+                                                    save_obj.facebook_url = facebook_url;
+                                                    save_obj.linkedin_url = linkedin_url;
+                                                    save_obj.email_address = email_address;
+                                                    save_obj.biography = twm_version === 1 ? biography : user_detailed_data[1].value;
+                                                    save_obj.twm_formatted = twm_formatted;
+                                                    save_obj.raw_description = user_detailed_data[1].value;
+                                                    save_obj.block_height = got_block.block_header.height;
+                                                    save_obj.pgp_public_key = '';
+                                                    save_obj.pgp_fingerprint = '';
+                                                    save_obj.website = website;
+                                                    save_obj.location = location;
+                                                    save_obj.safex_public_key = user_detailed_data[2].value;
+                                                    save_obj.twm_version = twm_version;
+
+                                                    let the_save = await save_user(save_obj);
+                                                    console.log(the_save);
+
+                                                    break;
+                                                } catch (err) {
+                                                    console.error(err);
+                                                    console.error(`error at saving the user object at account creation output`);
+                                                    process.exit();
+                                                    break;
                                                 }
-                                                if (twm_description.twitter) {
-                                                    twitter_url = twm_description.twitter;
-                                                }
-                                                if (twm_description.facebook) {
-                                                    facebook_url = twm_description.facebook;
-                                                }
-                                                if (twm_description.linkedin) {
-                                                    linkedin_url = twm_description.linkedin;
-                                                }
-                                                if (twm_description.email_address) {
-                                                    email_address = twm_description.email_address;
-                                                }
-                                                if (twm_description.biography) {
-                                                    biography = twm_description.biography;
-                                                }
-                                                if (twm_description.website) {
-                                                    website = twm_description.website;
-                                                }
-                                                if (twm_description.location) {
-                                                    location = twm_description.location;
-                                                }
-                                            } catch (err) {
+
+
+                                            } catch(err) {
+
                                                 console.error(err);
-                                                console.error(`description is not parsable`);
+                                                console.error(`error at getting the user ${u_obj.username}`);
                                             }
-                                            try {
-                                                let save_obj = {};
 
-                                                save_obj.username = user_id;
-                                                save_obj.avatar_image = avatar_image;
-                                                save_obj.admin_approved = false;
-                                                save_obj.twitter_url = twitter_url;
-                                                save_obj.facebook_url = facebook_url;
-                                                save_obj.linkedin_url = linkedin_url;
-                                                save_obj.email_address = email_address;
-                                                save_obj.biography = biography;
-                                                save_obj.twm_formatted = twm_formatted;
-                                                save_obj.raw_description = String.fromCharCode.apply(null, vout.target.script.data.slice(username_position + 34, vout.target.script.data.length + 1));
-                                                save_obj.block_height = got_block.block_header.height;
-                                                save_obj.pgp_public_key = '';
-                                                save_obj.pgp_fingerprint = '';
-                                                save_obj.website = website;
-                                                save_obj.location = location;
-                                                save_obj.safex_public_key = pub_keys;
-                                                save_obj.twm_version = twm_version;
 
-                                                let the_save = await save_user(save_obj);
-                                                console.log(the_save);
-
-                                                break;
-                                            } catch (err) {
-                                                console.error(err);
-                                                console.error(`error at saving the user object at account creation output`);
-                                                process.exit();
-                                                break;
-                                            }
                                             break;
 
                                         }
@@ -270,51 +288,9 @@ async function main() {
                                             console.log(vout.target.script);
                                             console.log(last_block_scanned);
 
-                                            let offer_detailed_data = await daemon_parse_transaction(vout.target.script.data);
+                                            let offer_detailed_data = await daemon_parse_transaction(vout.target.script.data, 20);
                                             console.log(offer_detailed_data);
                                             let offer_detailed_fields = offer_detailed_data.parsed_fields;
-
-                                            let offer_id = '';
-                                            for (const dec of vout.target.script.data.slice(0, 32)) {
-                                                offer_id += dec.toString(16);
-                                            }
-                                            console.log(`offer id ${offer_id}`);
-                                            let username_length = vout.target.script.data[64];
-                                            let offer_title_length = vout.target.script.data[username_length + 65];
-                                            let offer_title_start = username_length + 65;
-                                            let offer_title = vout.target.script.data.slice(offer_title_start, offer_title_start + offer_title_length + 1);
-                                            let price = vout.target.script.data.slice(offer_title_start + offer_title_length + 1, offer_title_start + offer_title_length + 9);
-                                            price.reverse();
-                                            var price_to_number = price.reduce((a, c, i) => a + c * 2 ** (56 - i * 8), 0) / 10000000000;
-                                            console.log(price_to_number);
-
-                                            let min_price = vout.target.script.data.slice(offer_title_start + offer_title_length + 9, offer_title_start + offer_title_length + 17);
-                                            min_price.reverse();
-                                            var min_price_to_number = min_price.reduce((a, c, i) => a + c * 2 ** (56 - i * 8), 0) / 10000000000;
-                                            console.log(`min sfx price ${min_price_to_number}`);
-                                            let quantity = vout.target.script.data.slice(offer_title_start + offer_title_length + 17, offer_title_start + offer_title_length + 25);
-                                            quantity.reverse();
-                                            var quantity_to_number = quantity.reduce((a, c, i) => a + c * 2 ** (56 - i * 8), 0);
-                                            console.log(`quantity_to_number  ${quantity_to_number}`);
-                                            let active_bool = vout.target.script.data[offer_title_start + offer_title_length + 25];
-                                            console.log(`active bool ${active_bool}`);
-                                            let oracle_bool = vout.target.script.data[offer_title_start + offer_title_length + 26];
-                                            console.log(`oracle_bool ${oracle_bool}`);
-                                            let description_length = vout.target.script.data[offer_title_start + offer_title_length + 27];
-                                            console.log(`description_length ${description_length}`);
-                                            let description_raw = vout.target.script.data.slice(offer_title_start + offer_title_length + 28, offer_title_start + offer_title_length + 28 + description_length);
-                                            console.log(String.fromCharCode.apply(null, description_raw));
-                                            //process.exit();
-
-
-
-                                            let username_slice = vout.target.script.data.slice(65, 65 + vout.target.script.data[64]);
-                                            console.log(`username length ${vout.target.script.data[64]}`);
-                                            console.log(`username ${String.fromCharCode.apply(null, username_slice)}`);
-                                            console.log(`offer title ${String.fromCharCode.apply(null, offer_title)}`);
-                                            console.log(`\n`);
-                                            console.log(parseInt(232).toString(16));
-                                            console.log(String.fromCharCode.apply(null, vout.target.script.data));
                                             let twm_formatted = false;
                                             let description = '';
                                             let main_image = '';
@@ -326,6 +302,9 @@ async function main() {
                                             let physical = true;
                                             let twm_version = 0;
                                             let category = '';
+                                            let nft = false;
+                                            let shipping = false;
+                                            let open_message = false;
                                             try {
 
                                                 let twm_description = JSON.parse(offer_detailed_fields[2].value);
@@ -362,10 +341,20 @@ async function main() {
                                                 if (twm_description.category) {
                                                     category = twm_description.category;
                                                 }
+                                                if(twm_description.shipping) {
+                                                    shipping = twm_description.shipping;
+                                                }
+                                                if(twm_description.nft) {
+                                                    nft = twm_description.nft;
+                                                }
+                                                if(twm_description.open_message) {
+                                                    open_message = twm_description.open_message;
+                                                }
                                             } catch (err) {
                                                 console.error(err);
                                                 console.error(`offer description is not parsable`);
                                             }
+
                                             try {
                                                 let save_obj = {};
                                                 save_obj.offer_id = offer_detailed_fields[3].value;
@@ -373,23 +362,29 @@ async function main() {
                                                 save_obj.main_image = main_image;
                                                 save_obj.admin_approved = false;
                                                 save_obj.sku = sku;
+                                                save_obj.title = offer_detailed_fields[1].value;
                                                 save_obj.barcode = barcode;
                                                 save_obj.weight = weight;
                                                 save_obj.country = country;
+                                                save_obj.nft = nft;
+                                                save_obj.shipping = shipping;
+                                                save_obj.open_message = open_message;
                                                 save_obj.message_type = message_type;
                                                 save_obj.twm_formatted = twm_formatted;
                                                 save_obj.raw_description = offer_detailed_fields[2].value;
                                                 save_obj.block_height = got_block.block_header.height;
                                                 save_obj.physical = physical;
                                                 save_obj.twm_version = twm_version;
-                                                save_obj.min_price = min_price_to_number;
+                                                save_obj.min_price = offer_detailed_fields[6].value / 10000000000;
                                                 save_obj.price = offer_detailed_fields[5].value / 10000000000;
-                                                save_obj.oracle = offer_detailed_fields[8].value ? true : false;
+                                                save_obj.oracle = offer_detailed_fields[9].value === '01' ? true : false;
                                                 save_obj.oracle_id = offer_detailed_fields[4].value;
-                                                save_obj.quantity = offer_detailed_fields[7].value;
+                                                save_obj.quantity = offer_detailed_fields[8].value;
                                                 save_obj.description = description;
                                                 save_obj.category = category;
+                                                save_obj.active = offer_detailed_fields[7].value === '01' ? true : false;
 
+                                                console.log(save_obj);
                                                 let the_save = await save_offer(save_obj);
                                                 console.log(the_save);
 
@@ -397,12 +392,180 @@ async function main() {
                                             } catch (err) {
                                                 console.error(err);
                                                 console.error(`error at saving the offer object at offer creation output`);
-                                                process.exit();
                                                 break;
                                             }
                                         }
                                         case 21: {
                                             console.log(`edit offer txn`);
+                                            console.log(vout.target.script);
+                                            console.log(last_block_scanned);
+
+                                            let edit_offer_detailed_data = await daemon_parse_transaction(vout.target.script.data, 21);
+
+                                            let edit_offer_detailed_fields = edit_offer_detailed_data.parsed_fields;
+                                            let edited_obj = {};
+                                            for (const val of edit_offer_detailed_fields) {
+                                                if (val.field == 'offer_id') {
+                                                    edited_obj.offer_id = val.value;
+                                                } else if (val.field == 'title') {
+                                                    edited_obj.title = val.value;
+                                                } else if (val.field == 'description') {
+                                                    edited_obj.description = val.value;
+                                                } else if (val.field == 'price_peg_id') {
+                                                    edited_obj.price_peg_id = val.value;
+                                                } else if (val.field == 'price') {
+                                                    edited_obj.price = val.value;
+                                                } else if (val.field == 'min_sfx_price') {
+                                                    edited_obj.min_sfx_price = val.value;
+                                                } else if (val.field == 'quantity') {
+                                                    edited_obj.quantity = val.value;
+                                                } else if (val.field == 'active') {
+                                                    edited_obj.active = val.value;
+                                                } else if (val.field == 'seller') {
+                                                    edited_obj.seller = val.value;
+                                                } else if (val.field == 'price_peg_used') {
+                                                    edited_obj.price_peg_used = val.value;
+                                                }
+                                            }
+
+                                            let offer_edit_o = {};
+                                            offer_edit_o.offer_id = edited_obj.offer_id;
+                                            offer_edit_o.edit_txid = txn.tx_hash;
+
+                                            let save_edit_txn = await save_offer_edit_txn(offer_edit_o);
+
+                                            console.log(save_edit_txn);
+
+
+                                            let twm_formatted = false;
+                                            let description = '';
+                                            let main_image = '';
+                                            let sku = '';
+                                            let barcode = '';
+                                            let weight = '';
+                                            let country = '';
+                                            let message_type = '';
+                                            let physical = true;
+                                            let twm_version = 0;
+                                            let category = '';
+                                            let nft = false;
+                                            let shipping = false;
+                                            let open_message = false;
+                                            try {
+
+                                                let twm_description = JSON.parse(edited_obj.description);
+
+                                                if (twm_description.twm_version === 1) {
+                                                    twm_formatted = true;
+                                                    twm_version = 1;
+                                                }
+                                                if (twm_description.description) {
+                                                    description = twm_description.description;
+                                                }
+                                                if (twm_description.main_image) {
+                                                    main_image = twm_description.main_image;
+                                                }
+                                                if (twm_description.sku) {
+                                                    sku = twm_description.sku;
+                                                }
+                                                if (twm_description.barcode) {
+                                                    barcode = twm_description.barcode;
+                                                }
+                                                if (twm_description.weight) {
+                                                    weight = twm_description.weight;
+                                                }
+                                                if (twm_description.country) {
+                                                    country = twm_description.country;
+                                                }
+                                                if (twm_description.message_type) {
+                                                    message_type = twm_description.message_type;
+                                                }
+                                                if (twm_description.physical) {
+                                                    //physical = twm_description.physical;
+                                                    //assume all items are physical for now.
+                                                }
+                                                if (twm_description.category) {
+                                                    category = twm_description.category;
+                                                }
+                                                if(twm_description.shipping) {
+                                                    shipping = twm_description.shipping;
+                                                }
+                                                if(twm_description.nft) {
+                                                    nft = twm_description.nft;
+                                                }
+                                                if(twm_description.open_message) {
+                                                    open_message = twm_description.open_message;
+                                                }
+                                            } catch (err) {
+                                                console.error(err);
+                                                console.error(`offer description is not parsable`);
+                                            }
+
+                                            let current_offer = await get_offer_by_offer_id(edited_obj.offer_id);
+
+                                            let edit_count = await get_offer_version_counts(edited_obj.offer_id);
+
+                                            if (current_offer == 0) {
+
+                                                break;
+
+                                            }
+
+                                            //get edit offer counts here
+
+                                            console.log(current_offer.models[0]);
+                                            let current_attributes = current_offer.models[0].attributes;
+
+                                            console.log(edit_offer_detailed_data);
+                                            console.log(`now exiting`);
+                                            console.log(edited_obj);
+                                            try {
+                                                let save_obj = {};
+                                                save_obj.offer_id = edited_obj.offer_id;
+                                                save_obj.username = edited_obj.username;
+                                                save_obj.main_image = main_image;
+                                                save_obj.admin_approved = false;
+                                                save_obj.sku = sku;
+                                                save_obj.title = edited_obj.title;
+                                                save_obj.barcode = barcode;
+                                                save_obj.weight = weight;
+                                                save_obj.country = country;
+                                                save_obj.nft = nft;
+                                                save_obj.shipping = shipping;
+                                                save_obj.open_message = open_message;
+                                                save_obj.message_type = message_type;
+                                                save_obj.twm_formatted = twm_formatted;
+                                                save_obj.raw_description = edited_obj.description;
+                                                save_obj.block_height = got_block.block_header.height;
+                                                save_obj.physical = physical;
+                                                save_obj.twm_version = twm_version;
+                                                save_obj.edit_version = edit_count;
+                                                save_obj.min_price = edited_obj.min_sfx_price / 10000000000;
+                                                save_obj.price = edited_obj.price / 10000000000;
+                                                save_obj.oracle = edited_obj.price === '01' ? true : false;
+                                                save_obj.oracle_id = edited_obj.price_peg_id;
+                                                save_obj.quantity = edited_obj.quantity;
+                                                save_obj.description = description;
+                                                save_obj.category = category;
+                                                save_obj.active = edited_obj.active === '01' ? true : false;
+                                                if (current_attributes.admin_approved === true) {
+                                                    save_obj.edit_admin_reapprove = true;
+                                                }
+                                                let saved = await save_edit_offer(edited_obj.offer_id, save_obj);
+                                                console.log(`saved edit offer ${edited_obj.offer_id}`);
+                                            } catch(err) {
+                                                console.error(err);
+                                            }
+
+
+
+                                            //identify which offer was edited
+                                            //then identify which fields were edited
+                                            //then substitute them, and mark it edited, and admin unapproved
+                                            //then add to the admin so when you can sort for edited and admin unapproved
+                                            //should be flag, edited_awaiting_admin = true in this case if the product was already.
+                                            //should add edited incrementor so we can version control
+
                                             break;
                                         }
                                         case 30: {

@@ -1,10 +1,11 @@
 import express from 'express';
 import bodyParser from 'body-parser';
-import {API_PORT} from '../../../config.js';
+import {API_PORT} from '../../config.js';
 
 import users from './users';
 import info from './info';
 import offers from './offers';
+import messages from './messages';
 
 var cors = require('cors');
 
@@ -18,6 +19,7 @@ app.use(bodyParser.json());
 app.use('/users', users);
 app.use('/info', info);
 app.use('/offers', offers);
+app.use('/messages', messages);
 
 
 app.listen(API_PORT);
